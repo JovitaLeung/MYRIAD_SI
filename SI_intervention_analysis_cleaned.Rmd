@@ -1,11 +1,347 @@
 ---
-title: "Untitled"
-author: "Jovita T. Leung"
-date: "04/03/2021"
-output: html_document
+title: "The Effect of Mindfulness Training on Adolescents' Susceptibility of Prosocial and Antisocial Influence"
+output:
+  html_notebook:
+    toc: yes
+    toc_float: yes
 ---
+
+#### Jovita Leung, Blanca Piera Pi-Sunyer, Saz Ahmed, Sarah-Jayne Blakemore
+#### Institute of Cognitive Neuroscience, University College London
+#### Study protocol: https://osf.io/d6y9q/
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+## Summary
+We have analysed data from 352 participants aged 11-16 years old to investigate the effect of mindfulness training on susceptibility to social influence. We had 4 hypotheses:  
+
+1. **Effect of intervention on social influence:** The extent to which participants change their rating from Rating 1 to Rating 2 will decrease after Time 2.  
+2. **Effect of intervention on prosocial and antisocial influence:** The changes in social influence from Time 1 to Time 2 will be affected by the social condition.   
+3. **Differences in intervention:** The changes in social influence from Time 1 to Time 2 for both prosocial and antisocial behaviours will be affected by the type of intervention.  
+4. **Differences in prosocial and antisocial influence across intervention:**  The changes in social influence from Time 1 to Time 2 will be affected by social condition and the type of intervention, suggesting the interventions may affect prosocial and antisocial influence differently.  
+
+### Main results
+* The results suggested that participants were less socially influenced at Time 2 as compared to Time 1.  
+* We also found that participants were less socially influenced in antisocial ratings post-intervention at Time 2. No difference was found for social influence on prosocial ratings.
+* The changes in social influence from Time 1 to Time 2 did not differ across the type of intervention received by the participants.  
+* Although we did not find a significant 4-way interaction between delta rating, time point, intervention and social condition, post-hoc analysis suggested that while mindfulness intervention (.b) reduce the effect of delta rating in both prosocial and antisocial conditions, the controlled intervention (SSS) only reduce the effect in antisocial condition. 
+ 
+***
+## Setup
+```{r echo=TRUE, message=FALSE}
+# Load libraries
+library(dplyr)
+library(latticeExtra)
+library(session)
+library(plyr)
+library(tidyr)
+library(doBy)
+library(lmerTest) 
+library(Hmisc)
+library(anchors)
+library(lmerTest)
+library(car)
+library(emmeans)
+library(ggfortify)
+library(data.table)
+library(ggeffects)
+```
+
+```{r results='hide', message=FALSE}
+# Clean environment 
+rm(list = ls(all.names = TRUE))
+
+# Functions ----
+# Replaces values higher/lower than 4*SD from the mean (we later re-run models without such extreme values)
+outliersZ.4 <- function(data, zCutOff = 4, replace = NA, values = FALSE, digits = 2) {
+  stdev <- sqrt(sum((data - mean(data, na.rm = T))^2, na.rm = T) / sum(!is.na(data)))
+  absZ <- abs(data - mean(data, na.rm = T)) / stdev
+  data[absZ > zCutOff] <- replace 
+  
+  if (values == TRUE) {
+    return(round(absZ, digits))
+  } else {
+    return(round(data, digits))
+  }
+}
+
+# Import data 
+all=read.csv("~/Dropbox/MYRIAD Data/R_analysis/intervention analysis/SI analysis/all_data_2021.csv")
+```
+
+
+## Data tidying
+```{r echo=FALSE}
+all[c("subjno","gender","session","intervention","scenario_pro","scenario_anti","cue")]=
+  lapply(all[c("subjno","gender","session","intervention","scenario_pro","scenario_anti","cue")],factor)
+
+all$cue=factor(all$cue, levels=c('1','2'),labels = c("Prosocial","Antisocial"))
+all$intervention=factor(all$intervention, levels=c('0','1'),labels = c("SSS",".b"))
+all$time=factor(all$session, levels=c('1','2'), labels = c("Time 1","Time 2"))
+```
+* Cue: 
+  + 1= Prosocial
+  + 2= Antisocial
+* Intervention: 
+  + 0= SSS (Control)
+  + 1= .b (Mindfulness)
+* Session:
+  + 1= Time 1/Pre-intervention
+  + 2= Time 2/Post-intervention
+
+### Create new variables
+```{r}
+#  Conform/anti-conform variable
+all$conf <- ifelse(all$delta_rating< 0 & all$R2R1diff < 0 | all$delta_rating > 0 & all$R2R1diff > 
+    0, 1, ifelse(all$delta_rating < 0 & all$R2R1diff > 0 | all$delta_rating > 0 & all$R2R1diff < 
+    0, -1, 0))
+```
+  
+```{r}
+# Conformity variable
+# Positive numbers indicate magnitude conformed; negative indicate anti-conform
+all$R2R1.conf=all$abs.R2R1diff*all$conf
+
+# Create delta adjusted
+all <- all %>% mutate(delta_adjusted = ifelse(cue == "Prosocial", 0 + delta_rating, ifelse(cue == 
+    "Antisocial", 0 - delta_rating, NA)))
+
+# Create an influence variable
+all$influence <- ifelse(all$delta_adjusted > 0, "Benevolent", ifelse(all$delta_adjusted < 
+    0, "Malevolent", ifelse(all$delta_adjusted == 0, "None", NA)))
+
+all$influence=as.factor(all$influence)
+```
+#### Conformity variable:
+  * 1 =conform, changing ratings towards the provided rating
+  * 0 =no change, not influenced 
+  * -1 =anti-conform, changing ratings away from the provided rating
+
+Adding difference between R2 and R1 but controlling for whether they conform or anti-conform within.
+This means that now this variable measures the social influence, and whether the participant was socially influenced to conform or to anti-conform.
+As opposed to whether the participant was influenced to decrease or increase their rating.  
+
+#### Exploratory direction of influence variable:
+  * Delta adjusted scales based on cue - prosocial or antisocial
+  * Benevolent influence means the provided is more prosocial than the participant if the cue is prosocial, or less antisocial if the cue is antisocial
+  * Malevolent influence means the provided is less prosocial than the participant if the cue is prosocial, or more antisocial if the cue is antisocial
+
+**BUT**, an issue with the above is that this does not distinguish the difference in prosocial and antisocial influence (i.e. being less prosocial does not necessarily mean more antisocial, vice versa). Therefore, we created a new variable combining social condition and direction of influence. 
+```{r}
+# Create new variable for cue + direction combined
+all$direction=ifelse(all$cue == "Prosocial" & all$influence == "Benevolent", "More Prosocial",
+                      ifelse(all$cue == "Prosocial" & all$influence == "Malevolent", "Less Prosocial",
+                             ifelse(all$cue == "Antisocial" & all$influence == "Malevolent", "More Antisocial",
+                                    "Less Antisocial")))
+
+all$direction=as.factor(all$direction)
+```
+
+### Helmert Coding
+```{r}
+# Helmert Coding as suggested by Maarten 18.11.20 ----
+helmert_cue = contr.helmert(2, contrasts = TRUE, sparse = FALSE)
+contrasts(all$cue) = helmert_cue
+
+helmert_int = contr.helmert(2, contrasts = TRUE, sparse = FALSE)
+contrasts(all$intervention) = helmert_int
+
+helmert_inf = contr.helmert(2, contrasts = TRUE, sparse = FALSE)
+contrasts(all$influence) = helmert_inf
+
+helmert_dir = contr.helmert(4, contrasts = TRUE, sparse = FALSE)
+contrasts(all$direction) = helmert_dir
+```
+
+## Manipulation checks
+```{r}
+# Do participants conform to a greater extent than 0 or anticonform?
+table <- summaryBy(R2R1.conf ~ subjno, all, FUN=c(mean))
+t=t.test(table$R2R1.conf.mean) 
+t # Yes, M [.43 .53] = 0.48; (p < 0.001)
+
+#And for each individual condition?
+table <- summaryBy(R2R1.conf ~ subjno + session + intervention + cue, all, FUN=c(mean))
+m <- expand.grid(
+  intervention=levels(all$intervention), 
+  session = levels(all$time),
+  cue = levels(all$cue)
+) 
+
+for (i in c(1:nrow(m))){
+  t=t.test(table$R2R1.conf.mean[table$session == m$session[i] & table$intervention == m$intervention[i] & table$cue ==m$cue[i]])
+  m$mean[i]=round(t$estimate,3)
+  m$CI.lower[i]=as.numeric(round(t$conf.int,3))[1]
+  m$CI.upper[i]=as.numeric(round(t$conf.int,3))[2]
+  m$t[i]=t$statistic
+  m$Df[i]=t$parameter
+  m$p.unc[i]=t$p.value
+}
+m #Yes, all M +ive; (all ps < 0.001)
+```
+
+<span style="color: red;"> Blanca to add other checks (e.g. t-tests, histograms) </span>
+
+## Model comparisons 
+```{r}
+# Slope of Delta ----
+all$delta.s=scale(all$delta_rating)
+
+mm.1=lmer(R2R1diff~delta.s+ (delta.s|subjno),
+          control = lmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)), all)
+mm.2=lmer(R2R1diff~I(delta.s^2)+ (1|subjno),
+          control = lmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)), all)
+mm.3=lmer(R2R1diff~I(delta.s^3) + (delta.s|subjno),
+             control = lmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)), all)
+mm.4=lmer(R2R1diff~I(delta.s^4) + (delta.s|subjno),
+             control = lmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000)), all)
+
+model.list=mget(grep("mm.", ls(),value=T))
+aics<-lapply(model.list,function(x)AIC(x))
+sort(unlist(aics))
+```
+
+***
+## Analysis
+### Model 1: Change in rating from intervention, time, cue, delta
+```{r}
+model1=lmer(R2R1diff~intervention*time*cue*scale(delta_rating)+(time*cue+scale(delta_rating)|subjno),
+            control = lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=100000)), all)
+Anova(model1, type=3)
+```
+
+
+```{r}
+#Contrasts - 4-way
+emt=emtrends(model1, pairwise ~ time|intervention|cue, var="delta_rating", adjust="Bonferroni")
+summary(emt,c(T,T)) #Delta_rating affects change in ratings before the interventions and after, but more so before than after (significant)
+```
+
+### Model 1.1: A better-fitted model
+```{r}
+model1.1=lmer(R2R1diff~intervention*time+time*cue*scale(delta_rating)+(time*cue+scale(delta_rating)|subjno),
+              control = lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=100000)), all)
+anova(model1, model1.1) #This model explains the data better
+Anova(model1.1,type=3)
+```
+
+#### Contrasts - Model 1.1
+```{r message=FALSE}
+# Contrasts - CUE
+emmeans(model1.1, pairwise ~ cue, adjust="Bonferroni") 
+```
+* People decrease their ratings in antisocial behaviour, and increase their rating for prosocial behaviour, and this difference is significant.
+
+```{r}
+# Contrasts - Delta_rating
+summary(model1.1) 
+```
+* The delta is positively associated with change in rating, such that greater deltas increase ratings and lower deltas decrease them.
+
+```{r message=FALSE}
+#Contrasts - Time * Delta_rating
+emt=emtrends(model1.1, pairwise ~ time, var="delta_rating", adjust="Bonferroni")
+summary(emt,c(T,T)) 
+```
+* Delta_rating affects change in ratings before the interventions and after, but more so before than after (significant).
+
+```{r message=FALSE}
+#Contrasts - Cue * Delta_rating
+emt=emtrends(model1.1, pairwise ~ cue, var="delta_rating", adjust="Bonferroni")
+summary(emt,c(T,T)) 
+```
+* Delta_rating affects change in ratings in both antisocial and prosocial trials, but these are not significantly different.
+
+```{r message=FALSE}
+#Contrasts - Cue * Delta_rating * Time
+emt=emtrends(model1.1 , pairwise ~ time|cue, var="delta_rating", adjust="Bonferroni", type="response")
+summary(emt,c(T,T))
+```
+
+```{r message=FALSE}
+emt=emtrends(model1.1 , pairwise ~ cue|time, var="delta_rating", adjust="Bonferroni")
+summary(emt,c(T,T))
+```
+
+While delta has a posiitve association with change in rating in all conditions, it seems that:  
+
+* The delta does not affect change in ratings differently before and after intervention for prosocial behaviour. 
+* The delta affects change in ratings for antisocial trials to a greater extent before the intervention than after. 
+* The delta affects the change in ratings before the interventions to a greater extent for antisocial than prosocial influence. 
+* The delta does not affect prosocial influence and antisocial influence differently after the intervention. 
+
+### Graphs: Model 1.1
+**Plot for H1:** Social influence is greater at Time 1 than at Time 2. 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+pred=ggpredict(model1.1, terms = c("delta_rating","time"))
+summary(pred)
+
+plot(pred)+theme_classic()+
+  labs(title=' ', x='Delta rating', y='Predicted change in rating \n (difference between rating 1 and rating 2)')+
+  scale_colour_manual(values = c("forestgreen","darkorange"), name="Time", labels = c("Time 1", "Time 2"))+
+  scale_fill_manual(values = c("forestgreen","darkorange"))
+```
+
+**Plot for H2:** At Time 2, participants are less socially influenced by antisocial ratings, while this is not the case for prosocial ratings. 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+pred=ggpredict(model1.1, terms = c("delta_rating","time","cue"))
+summary(pred)
+
+plot(pred)+theme_classic()+
+  labs(title=' ', x='Delta rating', y='Predicted change in rating \n (difference between rating 1 and rating 2)')+
+  scale_colour_manual(values = c("forestgreen","darkorange"), name="Time", labels = c("Time 1", "Time 2"))+
+  scale_fill_manual(values = c("forestgreen","darkorange"))
+```
+
+*** 
+### Model 2: Direction of influence
+Conforming change in rating from intervention * time * direction
+```{r}
+model2=lmer(R2R1.conf~intervention*time*direction+(time|subjno),
+            control = lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=100000)), all)
+Anova(model2,type=3)
+```
+
+```{r}
+model2.1=lmer(R2R1.conf~intervention*time+time*direction+(time|subjno),
+              control = lmerControl(optimizer="bobyqa", optCtrl=list(maxfun=100000)), all)
+anova(model2,model2.1) #Justified to use the simpler one
+Anova(model2.1,type=3)
+```
+
+#### Contrasts - Model 2.1
+```{r message=FALSE}
+# Contrasts - Time
+emmeans(model2.1, pairwise ~ time, adjust="Bonferroni") 
+```
+* Participants are more influenced before than after the intervention.
+
+```{r message = FALSE}
+#Contrasts - Direction
+emmeans(model2.1, pairwise ~ direction, adjust="Bonferroni") 
+```
+* Participants are more influenced to be less antisocial than less prosocial; less antisocial than more antisocial; more prosocial than less antisocial; and more prosocial than more antisocial.
+
+### Graphs: Model 2.1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+emmeans(model2.1, pairwise ~ direction|time, adjust="Bonferroni",type="response")
+
+slopes=data.frame(emmeans(model2.1, pairwise~ direction|time)$emmeans)
+ggplot(slopes,  aes(direction, emmean, group=time, fill=time)) +
+  geom_point(shape=15, size=3,position = position_dodge(width=0.40))+
+  geom_errorbar(aes(min = asymp.LCL, ymax = asymp.UCL), width = 0.05,size  = 0.5,position = position_dodge(width=0.40))+
+  theme_bw()+ylab("Conforming change in ratings")+geom_bar(stat="identity", alpha=0.6, width=0.4, position=position_dodge())+
+  theme(axis.text=element_text(size=12),axis.title=element_text(size=16,face="bold"), 
+        axis.text.x=element_text(angle = 0),legend.text=element_text(size=16),
+        legend.title=element_text(size=16),strip.text = element_text(size=12, face="bold"),
+        panel.grid.minor = element_blank())+xlab("Direction of influence")+
+  scale_fill_manual(values=c("forestgreen","darkorange"),name="Time", labels= c("Time 1","Time2"))
+```
+
+
+***
+## Control models 
+
 
