@@ -1,6 +1,11 @@
 ---
-title: "The Effect of Mindfulness Training on Adolescents' Susceptibility of Prosocial and Antisocial Influence"
+title: The Effect of Mindfulness Training on Adolescents' Susceptibility of Prosocial
+  and Antisocial Influence
 output:
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
   html_notebook:
     toc: yes
     toc_float: yes
