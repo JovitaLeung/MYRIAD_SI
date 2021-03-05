@@ -23,14 +23,13 @@ We have analysed data from 352 participants aged 11-16 years old to investigate 
 4. **Differences in prosocial and antisocial influence across intervention:**  The changes in social influence from Time 1 to Time 2 will be affected by social condition and the type of intervention, suggesting the interventions may affect prosocial and antisocial influence differently.  
 
 ### Main results
-* The results suggested that participants were less socially influenced at Time 2 as compared to Time 1.  
-* We also found that participants were less socially influenced in antisocial ratings post-intervention at Time 2. No difference was found for social influence on prosocial ratings.
-* The changes in social influence from Time 1 to Time 2 did not differ across the type of intervention received by the participants.  
-* Although we did not find a significant 4-way interaction between delta rating, time point, intervention and social condition, post-hoc analysis suggested that while mindfulness intervention (.b) reduce the effect of delta rating in both prosocial and antisocial conditions, the controlled intervention (SSS) only reduce the effect in antisocial condition. 
+<span style="color:red;"> [add results] </span>  
+
+<span style="color:red;"> [add results] </span>
  
 ***
 ## Setup
-```{r echo=TRUE, message=FALSE}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 # Load libraries
 library(dplyr)
 library(latticeExtra)
@@ -325,6 +324,19 @@ emmeans(model2.1, pairwise ~ direction, adjust="Bonferroni")
 * Participants are more influenced to be less antisocial than less prosocial; less antisocial than more antisocial; more prosocial than less antisocial; and more prosocial than more antisocial.
 
 ### Graphs: Model 2.1
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Main effect of directions
+slopes=data.frame(emmeans(model2.1, pairwise~ direction)$emmeans)
+ggplot(slopes,  aes(direction, emmean, fill=direction)) +
+  geom_point(shape=15, size=3,position = position_dodge(width=0.40))+
+  geom_errorbar(aes(min = asymp.LCL, ymax = asymp.UCL), width = 0.05,size  = 0.5,position = position_dodge(width=0.40))+
+  theme_bw()+ylab("Conforming change in ratings")+geom_bar(stat="identity", alpha=0.6, width=0.4, position=position_dodge())+
+  theme(axis.text=element_text(size=11),axis.title=element_text(size=13,face="bold"), 
+        axis.text.x=element_text(angle = 0),legend.text=element_blank(), 
+        legend.title=element_blank())+xlab("Direction of influence")
+```
+
+
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 emmeans(model2.1, pairwise ~ direction|time, adjust="Bonferroni",type="response")
 
